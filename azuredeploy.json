@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.20.4.51522",
-      "templateHash": "17517384546807042260"
+      "templateHash": "14746400567000441809"
     }
   },
   "parameters": {
@@ -21,21 +21,13 @@
         "description": "Location where all resources will be deployed. This value defaults to the **West Europe** region."
       }
     },
-    "utcValue": {
-      "type": "string",
-      "defaultValue": "[utcNow()]"
-    },
-    "sleepSeconds": {
-      "type": "int",
-      "defaultValue": 30
-    },
     "name": {
       "type": "string",
-      "defaultValue": "icisai",
+      "defaultValue": "netizineai",
       "minLength": 3,
       "maxLength": 15,
       "metadata": {
-        "description": "Unique name for the deployed services below. Min length of 3 characters and a Max length 15 characters, alphanumeric only:\n- Azure Cosmos DB for NoSQL\n- Azure Cosmos DB for MongoDB vCore\n- Azure OpenAI\n- Azure App Service\n- Azure Functions\n\n. Defaults to **icisai**.\n"
+        "description": "Unique name for the deployed services below. Min length of 3 characters and a Max length 15 characters, alphanumeric only:\n- Azure Cosmos DB for NoSQL\n- Azure Cosmos DB for MongoDB vCore\n- Azure OpenAI\n- Azure App Service\n- Azure Functions\n\n. Defaults to **netizineai**.\n"
       }
     },
     "appServiceSku": {
@@ -71,9 +63,9 @@
     "mongoDbPassword": {
       "type": "securestring",
       "minLength": 8,
-      "maxLength": 256,
+      "maxLength": 64,
       "metadata": {
-        "description": "MongoDb vCore password. 8-256 characters, 3 of the following: lower case, upper case, numeric, symbol."
+        "description": "MongoDb vCore password. 8-64 characters, 3 of the following: lower case, upper case, numeric, symbol."
       }
     },
     "appGitRepository": {
@@ -176,10 +168,10 @@
       "location": "[parameters('location')]",
       "kind": "AzurePowerShell",
       "properties": {
-        "forceUpdateTag": "[parameters('utcValue')]",
+        "forceUpdateTag": "utcNow()",
         "azPowerShellVersion": "8.3",
         "timeout": "PT10M",
-        "arguments": "[format('-seconds {0}', parameters('sleepSeconds'))]",
+        "arguments": "-seconds 30",
         "scriptContent": "    param ( [string] $seconds )    \n    Write-Output Sleeping for: $seconds ....\n    Start-Sleep -Seconds $seconds   \n    Write-Output Sleep over - resuming ....\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D"
@@ -293,7 +285,7 @@
     },
     {
       "type": "Microsoft.CognitiveServices/accounts",
-      "apiVersion": "2022-12-01",
+      "apiVersion": "2023-05-01",
       "name": "[variables('openAiSettings').name]",
       "location": "[parameters('location')]",
       "sku": {
@@ -307,17 +299,18 @@
     },
     {
       "type": "Microsoft.CognitiveServices/accounts/deployments",
-      "apiVersion": "2022-12-01",
+      "apiVersion": "2023-05-01",
       "name": "[format('{0}/{1}', variables('openAiSettings').name, variables('openAiSettings').embeddingsModel.deployment.name)]",
       "properties": {
         "model": {
           "format": "OpenAI",
           "name": "[variables('openAiSettings').embeddingsModel.name]",
           "version": "[variables('openAiSettings').embeddingsModel.version]"
-        },
-        "scaleSettings": {
-          "scaleType": "Standard"
         }
+      },
+      "sku": {
+        "name": "Standard",
+        "capacity": 120
       },
       "dependsOn": [
         "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name)]",
@@ -326,17 +319,18 @@
     },
     {
       "type": "Microsoft.CognitiveServices/accounts/deployments",
-      "apiVersion": "2022-12-01",
+      "apiVersion": "2023-05-01",
       "name": "[format('{0}/{1}', variables('openAiSettings').name, variables('openAiSettings').completionsModel.deployment.name)]",
       "properties": {
         "model": {
           "format": "OpenAI",
           "name": "[variables('openAiSettings').completionsModel.name]",
           "version": "[variables('openAiSettings').completionsModel.version]"
-        },
-        "scaleSettings": {
-          "scaleType": "Standard"
         }
+      },
+      "sku": {
+        "name": "Standard",
+        "capacity": 120
       },
       "dependsOn": [
         "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name)]"
@@ -367,11 +361,25 @@
     {
       "type": "Microsoft.Storage/storageAccounts",
       "apiVersion": "2021-09-01",
-      "name": "[format('{0}fnstorage', parameters('name'))]",
+      "name": "[format('{0}storage', parameters('name'))]",
       "location": "[parameters('location')]",
-      "kind": "Storage",
+      "kind": "StorageV2",
       "sku": {
         "name": "Standard_LRS"
+      },
+      "properties": {
+        "encryption": {
+          "services": {
+            "blob": {
+              "enabled": true
+            },
+            "file": {
+              "enabled": true
+            }
+          },
+          "keySource": "Microsoft.Storage"
+        },
+        "supportsHttpsTrafficOnly": true
       }
     },
     {
@@ -389,7 +397,7 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Web/serverfarms', variables('appServiceSettings').plan.name)]",
-        "[resourceId('Microsoft.Storage/storageAccounts', format('{0}fnstorage', parameters('name')))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', format('{0}storage', parameters('name')))]"
       ]
     },
     {
@@ -403,8 +411,8 @@
         "COSMOSDB__KEY": "[listKeys(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbSettings').name), '2022-08-15').primaryMasterKey]",
         "COSMOSDB__DATABASE": "[variables('cosmosDbSettings').databaseName]",
         "COSMOSDB__CONTAINERS": "completions,product,customer",
-        "OPENAI__ENDPOINT": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2022-12-01').endpoint]",
-        "OPENAI__KEY": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2022-12-01').key1]",
+        "OPENAI__ENDPOINT": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2023-05-01').endpoint]",
+        "OPENAI__KEY": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2023-05-01').key1]",
         "OPENAI__EMBEDDINGSDEPLOYMENT": "[variables('openAiSettings').embeddingsModel.deployment.name]",
         "OPENAI__COMPLETIONSDEPLOYMENT": "[variables('openAiSettings').completionsModel.deployment.name]",
         "OPENAI__MAXCONVERSATIONBYTES": "[variables('openAiSettings').maxConversationBytes]",
@@ -429,13 +437,13 @@
       "name": "[format('{0}/{1}', variables('appServiceSettings').function.name, 'appsettings')]",
       "kind": "string",
       "properties": {
-        "AzureWebJobsStorage": "[format('DefaultEndpointsProtocol=https;AccountName={0}fnstorage;EndpointSuffix=core.windows.net;AccountKey={1}', parameters('name'), listKeys(resourceId('Microsoft.Storage/storageAccounts', format('{0}fnstorage', parameters('name'))), '2021-09-01').keys[0].value)]",
+        "AzureWebJobsStorage": "[format('DefaultEndpointsProtocol=https;AccountName={0}storage;EndpointSuffix=core.windows.net;AccountKey={1}', parameters('name'), listKeys(resourceId('Microsoft.Storage/storageAccounts', format('{0}storage', parameters('name'))), '2021-09-01').keys[0].value)]",
         "APPINSIGHTS_INSTRUMENTATIONKEY": "[reference(resourceId('Microsoft.Insights/components', variables('appServiceSettings').function.name), '2020-02-02').ConnectionString]",
         "FUNCTIONS_EXTENSION_VERSION": "~4",
         "FUNCTIONS_WORKER_RUNTIME": "dotnet",
         "CosmosDBConnection": "[listConnectionStrings(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbSettings').name), '2022-08-15').connectionStrings[0].connectionString]",
-        "OPENAI__ENDPOINT": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2022-12-01').endpoint]",
-        "OPENAI__KEY": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2022-12-01').key1]",
+        "OPENAI__ENDPOINT": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2023-05-01').endpoint]",
+        "OPENAI__KEY": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name), '2023-05-01').key1]",
         "OPENAI__EMBEDDINGSDEPLOYMENT": "[variables('openAiSettings').embeddingsModel.deployment.name]",
         "OPENAI__MAXTOKENS": "8191",
         "MONGODB__CONNECTION": "[format('mongodb+srv://{0}:{1}@{2}.mongocluster.cosmos.azure.com/?tls=true&authMechanism=SCRAM-SHA-256&retrywrites=false&maxIdleTimeMS=120000', variables('mongovCoreSettings').mongoClusterLogin, variables('mongovCoreSettings').mongoClusterPassword, variables('mongovCoreSettings').mongoClusterName)]",
@@ -448,7 +456,7 @@
         "[resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbSettings').name)]",
         "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name)]",
         "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('openAiSettings').name, variables('openAiSettings').embeddingsModel.deployment.name)]",
-        "[resourceId('Microsoft.Storage/storageAccounts', format('{0}fnstorage', parameters('name')))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', format('{0}storage', parameters('name')))]"
       ]
     },
     {
@@ -504,12 +512,68 @@
       "dependsOn": [
         "[resourceId('Microsoft.Web/sites', variables('appServiceSettings').web.name)]"
       ]
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[format('{0}-ai-insights', parameters('name'))]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web"
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2019-09-01",
+      "name": "[format('{0}-kv', parameters('name'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "tenantId": "[subscription().tenantId]",
+        "sku": {
+          "name": "standard",
+          "family": "A"
+        },
+        "enableSoftDelete": false,
+        "accessPolicies": []
+      }
+    },
+    {
+      "type": "Microsoft.MachineLearningServices/workspaces",
+      "apiVersion": "2020-08-01",
+      "name": "[format('{0}-ai-workspace', parameters('name'))]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "friendlyName": "[format('{0}-ai-workspace', parameters('name'))]",
+        "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', format('{0}storage', parameters('name')))]",
+        "keyVault": "[resourceId('Microsoft.KeyVault/vaults', format('{0}-kv', parameters('name')))]",
+        "applicationInsights": "[resourceId('Microsoft.Insights/components', format('{0}-ai-insights', parameters('name')))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', format('{0}-ai-insights', parameters('name')))]",
+        "[resourceId('Microsoft.KeyVault/vaults', format('{0}-kv', parameters('name')))]",
+        "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiSettings').name)]",
+        "[resourceId('Microsoft.Search/searchServices', format('{0}-search', parameters('name')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', format('{0}storage', parameters('name')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Search/searchServices",
+      "apiVersion": "2021-04-01-preview",
+      "name": "[format('{0}-search', parameters('name'))]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "standard"
+      },
+      "properties": {
+        "replicaCount": 1,
+        "partitionCount": 1,
+        "hostingMode": "default"
+      },
+      "tags": {}
     }
-  ],
-  "outputs": {
-    "deployedUrl": {
-      "type": "string",
-      "value": "[reference(resourceId('Microsoft.Web/sites', variables('appServiceSettings').web.name), '2022-03-01').defaultHostName]"
-    }
-  }
+  ]
 }

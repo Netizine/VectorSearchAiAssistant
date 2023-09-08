@@ -1,14 +1,10 @@
-@description('Location where all resources will be deployed. This value defaults to the **UK South** region.')
+@description('Location where all resources will be deployed. This value defaults to the **West Europe** region.')
 @allowed([
   'southcentralus'
   'eastus'
   'westeurope'
-  'uksouth'
 ])
-param location string = 'uksouth'
-
-param utcValue string = utcNow()
-param sleepSeconds int = 30
+param location string = 'westeurope'
 
 @description('''
 Unique name for the deployed services below. Min length of 3 characters and a Max length 15 characters, alphanumeric only:
@@ -18,11 +14,11 @@ Unique name for the deployed services below. Min length of 3 characters and a Ma
 - Azure App Service
 - Azure Functions
 
-. Defaults to **icisai**.
+. Defaults to **netizineai**.
 ''')
 @minLength(3)
 @maxLength(15)
-param name string = 'icisai'
+param name string = 'netizineai'
 
 @description('Specifies the SKU for the Azure App Service plan. Defaults to **S1**')
 @allowed([
@@ -140,10 +136,10 @@ resource sleepDelay 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
   location: location
   kind: 'AzurePowerShell'  
   properties: {
-    forceUpdateTag: utcValue
+    forceUpdateTag: 'utcNow()'
     azPowerShellVersion: '8.3'
     timeout: 'PT10M'    
-    arguments: '-seconds ${sleepSeconds}'    
+    arguments: '-seconds 30'    
     scriptContent: '''
     param ( [string] $seconds )    
     Write-Output Sleeping for: $seconds ....
@@ -243,7 +239,7 @@ resource mongoFirewallRulesAllowAll 'Microsoft.DocumentDB/mongoClusters/firewall
   }
 }
 
-resource openAiAccount 'Microsoft.CognitiveServices/accounts@2022-12-01' = {
+resource openAiAccount 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
   name: openAiSettings.name
   location: location
   sku: {
@@ -256,7 +252,7 @@ resource openAiAccount 'Microsoft.CognitiveServices/accounts@2022-12-01' = {
   }
 }
 
-resource openAiEmbeddingsModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2022-12-01' = {
+resource openAiEmbeddingsModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = {
   parent: openAiAccount
   name: openAiSettings.embeddingsModel.deployment.name
   properties: {
@@ -265,16 +261,17 @@ resource openAiEmbeddingsModelDeployment 'Microsoft.CognitiveServices/accounts/d
       name: openAiSettings.embeddingsModel.name
       version: openAiSettings.embeddingsModel.version
     }
-    scaleSettings: {
-      scaleType: 'Standard'
-    }
+  }
+  sku: {
+    name: 'Standard'
+    capacity: 120
   }
   dependsOn: [
     sleepDelay
   ]
 }
 
-resource openAiCompletionsModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2022-12-01' = {
+resource openAiCompletionsModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = {
   parent: openAiAccount
   name: openAiSettings.completionsModel.deployment.name
   properties: {
@@ -283,9 +280,10 @@ resource openAiCompletionsModelDeployment 'Microsoft.CognitiveServices/accounts/
       name: openAiSettings.completionsModel.name
       version: openAiSettings.completionsModel.version
     }
-    scaleSettings: {
-      scaleType: 'Standard'
-    }
+  }
+  sku: {
+    name: 'Standard'
+    capacity: 120
   }
 }
 
@@ -307,11 +305,25 @@ resource appServiceWeb 'Microsoft.Web/sites@2022-03-01' = {
 }
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2021-09-01' = {
-  name: '${name}fnstorage'
+  name: '${name}storage'
   location: location
-  kind: 'Storage'
+  kind: 'StorageV2'
   sku: {
     name: 'Standard_LRS'
+  }
+  properties: {
+    encryption: {
+      services: {
+        blob: {
+          enabled: true
+        }
+        file: {
+          enabled: true
+        }
+      }
+      keySource: 'Microsoft.Storage'
+    }
+    supportsHttpsTrafficOnly: true
   }
 }
 
@@ -358,7 +370,7 @@ resource appServiceFunctionSettings 'Microsoft.Web/sites/config@2022-03-01' = {
   name: 'appsettings'
   kind: 'string'
   properties: {
-    AzureWebJobsStorage: 'DefaultEndpointsProtocol=https;AccountName=${name}fnstorage;EndpointSuffix=core.windows.net;AccountKey=${storageAccount.listKeys().keys[0].value}'
+    AzureWebJobsStorage: 'DefaultEndpointsProtocol=https;AccountName=${name}storage;EndpointSuffix=core.windows.net;AccountKey=${storageAccount.listKeys().keys[0].value}'
     APPINSIGHTS_INSTRUMENTATIONKEY: appServiceFunctionsInsights.properties.ConnectionString
     FUNCTIONS_EXTENSION_VERSION: '~4'
     FUNCTIONS_WORKER_RUNTIME: 'dotnet'
@@ -417,4 +429,60 @@ resource appServiceWebInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
-output deployedUrl string = appServiceWeb.properties.defaultHostName
+resource appServiceMLInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: '${name}-ai-insights'
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+  }
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2019-09-01' = {
+  name: '${name}-kv'
+  location: location
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      name: 'standard'
+      family: 'A'
+    }
+    enableSoftDelete: false
+    accessPolicies: []
+  }
+}
+
+resource workspace 'Microsoft.MachineLearningServices/workspaces@2020-08-01' = {
+  name: '${name}-ai-workspace'
+  location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    friendlyName: '${name}-ai-workspace'
+    storageAccount: storageAccount.id
+    keyVault: keyVault.id
+    applicationInsights: appServiceMLInsights.id
+  }
+  dependsOn: [
+    searchService
+    openAiAccount
+  ]
+}
+
+resource searchService 'Microsoft.Search/searchServices@2021-04-01-Preview' = {
+  name: '${name}-search'
+  location: location
+  sku: {
+    name: 'standard'
+  }
+  properties: {
+    replicaCount: 1
+    partitionCount: 1
+    hostingMode: 'default'
+  }
+  tags: {}
+  dependsOn: []
+}
+
+
