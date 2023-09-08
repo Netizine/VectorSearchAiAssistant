@@ -1,30 +1,35 @@
-@description('Location where all resources will be deployed. This value defaults to the **East US** region.')
+@description('Location where all resources will be deployed. This value defaults to the **UK South** region.')
 @allowed([
   'southcentralus'
   'eastus'
   'westeurope'
+  'uksouth'
 ])
-param location string = 'eastus'
+param location string = 'uksouth'
+
+param utcValue string = utcNow()
+param sleepSeconds int = 30
 
 @description('''
-Unique name for the deployed services below. Max length 15 characters, alphanumeric only:
+Unique name for the deployed services below. Min length of 3 characters and a Max length 15 characters, alphanumeric only:
 - Azure Cosmos DB for NoSQL
 - Azure Cosmos DB for MongoDB vCore
 - Azure OpenAI
 - Azure App Service
 - Azure Functions
 
-The name defaults to a unique string generated from the resource group identifier.
+. Defaults to **icisai**.
 ''')
+@minLength(3)
 @maxLength(15)
-param name string = uniqueString(resourceGroup().id)
+param name string = 'icisai'
 
-@description('Specifies the SKU for the Azure App Service plan. Defaults to **B1**')
+@description('Specifies the SKU for the Azure App Service plan. Defaults to **S1**')
 @allowed([
   'B1'
   'S1'
 ])
-param appServiceSku string = 'B1'
+param appServiceSku string = 'S1'
 
 @description('Specifies the SKU for the Azure OpenAI resource. Defaults to **S0**')
 @allowed([
@@ -32,20 +37,22 @@ param appServiceSku string = 'B1'
 ])
 param openAiSku string = 'S0'
 
-@description('MongoDb vCore user Name. No dashes.')
-param mongoDbUserName string
-
-@description('MongoDb vCore password. 8-256 characters, 3 of the following: lower case, upper case, numeric, symbol.')
+@description('MongoDb vCore user Name. 8-32 characters. No dashes. Defaults to **sysadmin**')
 @minLength(8)
-@maxLength(256)
+@maxLength(32)
+param mongoDbUserName string= 'sysadmin'
+
+@description('MongoDb vCore password. 8-64 characters, 3 of the following: lower case, upper case, numeric, symbol.')
+@minLength(8)
+@maxLength(64)
 @secure()
 param mongoDbPassword string
 
 
-@description('Git repository URL for the application source. This defaults to the [`AzureCosmosDB/VectorSearchAiAssistant`](https://github.com/AzureCosmosDB/VectorSearchAiAssistant) repository.')
-param appGitRepository string = 'https://github.com/AzureCosmosDB/VectorSearchAiAssistant.git'
+@description('Git repository URL for the application source. This defaults to the [`Netizine/VectorSearchAiAssistant`](https://github.com/Netizine/VectorSearchAiAssistant) repository.')
+param appGitRepository string = 'https://github.com/Netizine/VectorSearchAiAssistant.git'
 
-@description('Git repository branch for the application source. This defaults to the [**MongovCore** branch of the `AzureCosmosDB/VectorSearchAiAssistant`](https://github.com/AzureCosmosDB/VectorSearchAiAssistant/tree/MongovCore) repository.')
+@description('Git repository branch for the application source. This defaults to the [**MongovCore** branch of the `Netizine/VectorSearchAiAssistant`](https://github.com/Netizine/VectorSearchAiAssistant/tree/MongovCore) repository.')
 param appGetRepositoryBranch string = 'MongovCore'
 
 var openAiSettings = {
@@ -65,18 +72,6 @@ var openAiSettings = {
     deployment: {
       name: 'embeddings'
     }
-  }
-}
-
-var deployedRegion = {
-  'East US': {
-    armName: toLower('eastus')
-  }
-  'South Central US': {
-    armName: toLower('southcentralus')
-  }
-  'West Europe': {
-    armName: toLower('westeurope')
   }
 }
 
@@ -137,6 +132,26 @@ var appServiceSettings = {
       repo: appGitRepository
       branch: appGetRepositoryBranch
     }
+  }
+}
+
+resource sleepDelay 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
+  name: '${name}-sleep'
+  location: location
+  kind: 'AzurePowerShell'  
+  properties: {
+    forceUpdateTag: utcValue
+    azPowerShellVersion: '8.3'
+    timeout: 'PT10M'    
+    arguments: '-seconds ${sleepSeconds}'    
+    scriptContent: '''
+    param ( [string] $seconds )    
+    Write-Output Sleeping for: $seconds ....
+    Start-Sleep -Seconds $seconds   
+    Write-Output Sleep over - resuming ....
+    '''
+    cleanupPreference: 'OnSuccess'
+    retentionInterval: 'P1D'
   }
 }
 
@@ -254,6 +269,9 @@ resource openAiEmbeddingsModelDeployment 'Microsoft.CognitiveServices/accounts/d
       scaleType: 'Standard'
     }
   }
+  dependsOn: [
+    sleepDelay
+  ]
 }
 
 resource openAiCompletionsModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2022-12-01' = {
