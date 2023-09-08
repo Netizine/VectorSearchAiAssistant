@@ -5,21 +5,20 @@
     "_generator": {
       "name": "bicep",
       "version": "0.20.4.51522",
-      "templateHash": "690392511858141145"
+      "templateHash": "17517384546807042260"
     }
   },
   "parameters": {
     "location": {
       "type": "string",
-      "defaultValue": "uksouth",
+      "defaultValue": "westeurope",
       "allowedValues": [
         "southcentralus",
         "eastus",
-        "westeurope",
-        "uksouth"
+        "westeurope"
       ],
       "metadata": {
-        "description": "Location where all resources will be deployed. This value defaults to the **UK South** region."
+        "description": "Location where all resources will be deployed. This value defaults to the **West Europe** region."
       }
     },
     "utcValue": {
@@ -72,9 +71,9 @@
     "mongoDbPassword": {
       "type": "securestring",
       "minLength": 8,
-      "maxLength": 64,
+      "maxLength": 256,
       "metadata": {
-        "description": "MongoDb vCore password. 8-64 characters, 3 of the following: lower case, upper case, numeric, symbol."
+        "description": "MongoDb vCore password. 8-256 characters, 3 of the following: lower case, upper case, numeric, symbol."
       }
     },
     "appGitRepository": {
